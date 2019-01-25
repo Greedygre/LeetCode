@@ -1,0 +1,22 @@
+func largestPerimeter(A []int) int {
+    sort.Ints(A)
+	if A==nil||len(A) <=2 {
+		return 0
+	}
+	//a,b,c := A[0],A[1],A[2]
+    result := 0
+    max := 0
+	for i:=2;i<len(A);i++{
+		result = A[i]+A[i-1]+A[i-2]
+		if A[i]*2<result {
+			max = Max(max,result)
+		}
+	}
+	return max
+}
+func Max(x,y int)  int{
+	if x > y{
+		return x
+	}
+	return y
+}

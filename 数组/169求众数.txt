@@ -1,0 +1,41 @@
+func majorityElement(nums []int) int {
+    
+    m := map[int]int{}
+    n := len(nums)
+    
+    for i:=0;i<len(nums);i++{
+        if _,ok := m[nums[i]];ok {
+    		d := m[nums[i]]
+    		d++
+    		m[nums[i]] = d
+    		continue
+		}
+    	m[nums[i]] = 1
+	}
+    for k,result := range m {
+    	if result > n/2{
+    		return k
+		}
+	}
+    return 0
+}
+
+方法二：维护一个count，遇到相同的就加一，不同的就-1，如果count变为0，result就前进一个数。
+
+func majorityElement(nums []int) int {
+    result := nums[0]
+    count := 0
+    for i:=0;i<len(nums);i++{
+        if result == nums[i] {
+    		count ++
+    		continue
+		}
+        count--
+        if count==0 {
+          result = nums[i+1]  
+        }
+    	
+	}
+   
+    return result
+}

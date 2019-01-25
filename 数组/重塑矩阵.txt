@@ -1,0 +1,35 @@
+
+func matrixReshape(nums [][]int, r int, c int) [][]int {
+
+	if len(nums) == 0 || len(nums[0])==0 ||len(nums)*len(nums[0])!=r*c {
+		return nums
+	}
+	result := make([][]int,0,r)
+	pre := make([]int,0,c)
+	count := 0
+	k := 1
+	for i:=0;i<len(nums);i++{
+		for j:=0;j<len(nums[0]);j++{
+			if count < c {
+
+				count ++
+				pre = append(pre, nums[i][j])
+
+				if k == r{
+
+					if count == c{
+
+						result = append(result,pre)
+					}
+				}
+				continue
+			}
+			result = append(result,pre)
+			pre = []int{}
+			count=0
+			k++
+			j--
+		}
+	}
+	return result
+}

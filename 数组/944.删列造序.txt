@@ -1,0 +1,18 @@
+func minDeletionSize(A []string) int {
+ //遍历一遍，找出不是非降序排列的列的个数min，即为D.length的最小值
+    
+    N := len(A)
+    d := len(A[0])
+    min := 0
+    for j:=0;j<d;j++{
+        pre:=A[0][j]
+        for i:=1;i<N;i++{
+            if pre > A[i][j]{
+                min++
+                break
+            }
+            pre=A[i][j]
+        }
+    }
+    return min
+}

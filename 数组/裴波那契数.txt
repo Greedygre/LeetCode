@@ -1,0 +1,15 @@
+func fib(N int) int {
+    if N==0 {
+        return 0
+    }
+    if N==1 {
+        return 1
+    }
+    a0 := 0
+    a1 := 1
+    for i := 0;i<N-1;i++{
+    a0,a1 = a1,a0+a1
+    }
+    return a1
+    
+}
