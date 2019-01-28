@@ -1,0 +1,25 @@
+// RecentCounter is
+type RecentCounter struct {
+	times []int
+}
+
+// Constructor is
+func Constructor() RecentCounter {
+	return RecentCounter{
+		times: make([]int, 0, 10000),
+	}
+}
+
+// Ping is
+func (rc *RecentCounter) Ping(t int) int {
+	rc.times = append(rc.times, t)
+	return len(rc.times) - sort.SearchInts(rc.times, t-3000)
+}
+
+
+/**
+ * Your RecentCounter object will be instantiated and called as such:
+ * obj := Constructor();
+ * param_1 := obj.Ping(t);
+ */
+Tips:SearchInt（a []int,b int) ,在a中找b，如果找到的话就返回下标，没有的话就返回大于前一个，小于后一个的位置的后者的坐标，比如b==4，a{1,2,5,6},返回2.
