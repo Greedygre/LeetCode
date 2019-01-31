@@ -1,0 +1,40 @@
+func moveZeroes(nums []int)  {
+    count := 0
+    result := []int{}
+    len := len(nums)
+    for i:=0;i<len;i++ {
+        if nums[i] == 0{
+            count ++
+            continue
+        }
+        result = append(result,nums[i])
+    }
+    for i:=0;i<count;i++{
+         result = append(result,0)
+    }
+    // fmt.Print(result)
+    copy(nums,result)
+}
+Tips:copy是将result切片的值赋予nums，但二者的物理地址没有变。
+方法二
+func moveZeroes(nums []int)  {
+	len := len(nums)
+loop:
+	for i:=0;i<len;i++ {
+		if nums[i] == 0 && i!=len-1{
+			for j:=i+1;j<len;j++ {
+				if nums[j]!=0 {
+
+					nums[i],nums[j] = nums[j],nums[i]
+					if j==len-1 {
+						break loop
+					}
+					break
+				}
+
+				
+			}
+
+		}
+
+	}

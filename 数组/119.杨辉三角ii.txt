@@ -1,0 +1,35 @@
+func getRow(rowIndex int) []int {
+result := make([]int,0,rowIndex)
+//fmt.Println(result)
+//fmt.Println(generate(rowIndex)[rowIndex-1])
+result = generate(rowIndex+1)[rowIndex]
+
+return result
+}
+// 生成杨辉三角的前n行
+func generate(numRows int) [][]int {
+    result := make([][]int,numRows)
+    if numRows ==0 {
+        return result
+    }
+	
+	result[0] = make([]int,1)
+	result[0][0] = 1
+	if numRows == 1 {
+		return result
+	}
+	result[1] = make([]int,2)
+	result[1][0] = 1
+	result[1][1] = 1
+	if numRows == 2 {
+		return result
+	}
+	for i:=2;i<numRows;i++{
+		result[i] = make([]int,i+1)
+		result[i][0],result[i][i] = 1,1
+		for j:=1;j<i;j++ {
+			result[i][j] = result[i-1][j-1] + result[i-1][j]
+		}
+	}
+	return result
+}
