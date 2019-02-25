@@ -19,3 +19,255 @@ func diStringMatch(S string) []int {
 	result = append(result, big)
 	return result
 }
+
+
+package voice_call
+
+import (
+	"code.byted.org/gopkg/mysql-driver"
+	"context"
+	redis_mutex "git.byted.org/ee/gopkg/mutex"
+	"git.byted.org/ee/lark/common/kitewrapper/gwpush"
+	"git.byted.org/ee/lark/facade/voip/constant"
+	"git.byted.org/ee/lark/facade/voip/dal"
+	"git.byted.org/ee/lark/facade/voip/helper"
+	"git.byted.org/ee/lark/facade/voip/service/message"
+	"git.byted.org/ee/lark/facade/voip/service/mutex"
+	"git.byted.org/ee/lark/facade/voip/service/proto"
+	"git.byted.org/ee/lark/facade/voip/service/push"
+	"git.byted.org/ee/lark/facade/voip/service/tea"
+	"git.byted.org/ee/lark/facade/voip/utils"
+	"git.byted.org/ee/lark/facade/voip/utils/errors"
+	"git.byted.org/ee/lark/im-protobuf/improto/e2eevoicecall"
+	"time"
+)
+
+type UpdatePack struct {
+	CurUserID                  int64
+	CurDeviceID                int64
+	CurStatus                  dal.VoIPStatus
+	PeerUserID                 int64
+	PeerDeviceID               int64
+	PatchedUserID              int64
+	PatchedDeviceID            int64
+	PatchedStatus              dal.VoIPStatus
+	PatchedPublicKey           []byte
+	PatchedUseBytedanceChannel bool
+	IsHost                     bool
+	VoiceCall                  *dal.VoiceCall
+}
+
+func UpdateE2EEVoiceCall(ctx context.Context, callID int64, patchedUserID int64, patchedDeviceID int64, patchedStatus dal.VoIPStatus, patchedPublicKey []byte, patchedUseBytedanceChannel bool) (*e2eevoicecall.E2EEVoiceCall, error) {
+	lockID := constant.RedisKeyVoIP + helper.I2S(callID)
+	token, ok := redis_mutex.Lock(lockID, constant.RedisTimeoutLimit, constant.RedisExpirationLimit)
+	if !ok {
+		utils.Logger(ctx).Errorf(constant.Service+"UpdateE2EEVoiceCall failed to get redis lock, callID= %d, lockID= %s", callID, lockID)
+		return nil, errors.NewServiceError("RedisLockError")
+	}
+	defer func() {
+		if err := redis_mutex.UnLock(lockID, token); err != nil {
+			utils.Logger(ctx).Errorf(constant.Service+"UpdateE2EEVoiceCall failed to release redis lock, callID= %d, lockID= %s", callID, lockID)
+		}
+	}()
+
+	voiceCall, err := dal.GetVoiceCallByID(ctx, callID)
+	if err != nil {
+		return nil, err
+	}
+	if voiceCall == nil {
+		utils.Logger(ctx).Errorf(constant.Service+"UpdateE2EEVoiceCall failed voice call not existed, callID= %d", callID)
+		return nil, errors.NewServiceError("VoiceCallServiceError")
+	}
+
+	pack, err := parse(ctx, patchedUserID, patchedDeviceID, patchedStatus, patchedPublicKey, patchedUseBytedanceChannel, voiceCall)
+	if err != nil {
+		return nil, err
+	}
+
+	if pack.CurStatus == dal.ClientLowVersion {
+		utils.Logger(ctx).Warnf(constant.Service+"UpdateE2EEVoiceCall failed due to client low version, callID= %d", pack.VoiceCall.CallID)
+		return nil, errors.NewServiceError("ClientLowVersion")
+	}
+
+	if pack.CurDeviceID != 0 && pack.CurDeviceID != pack.PatchedDeviceID {
+		utils.Logger(ctx).Errorf(constant.Service+"UpdateE2EEVoiceCall failed invalid PatchedDeviceID, callID= %d, CurDeviceID= %d, invalidDeviceID= %d", pack.VoiceCall.CallID, pack.CurDeviceID, pack.PatchedDeviceID)
+		return nil, errors.NewServiceError("InvalidDeviceID")
+	}
+
+	if needIgnore(pack.CurStatus, pack.PatchedStatus) {
+		utils.Logger(ctx).Infof(constant.Service+"UpdateE2EEVoiceCall ignore patched status, callID= %d, isHost= %t, curStatus= %v, PatchedStatus= %v", pack.VoiceCall.CallID, pack.IsHost, pack.CurStatus, pack.PatchedStatus)
+		return nil, nil
+	}
+
+	if isEndStatus(pack.CurStatus) {
+		utils.Logger(ctx).Warnf(constant.Service+"UpdateE2EEVoiceCall failed due to this call already ended, callID= %d, isHost= %t, curStatus= %v, patchedStatus= %v", pack.VoiceCall.CallID, pack.IsHost, pack.CurStatus, pack.PatchedStatus)
+		return nil, errors.NewServiceError("AlreadyEnded")
+	}
+
+	if !isStatusTransValid(pack.IsHost, pack.CurStatus, pack.PatchedStatus) {
+		go utils.StateMachineMetric(pack.IsHost, pack.CurStatus.String(), pack.PatchedStatus.String())
+		go tea.Monitor(ctx, tea.VoIPStateMachineUnexpected, patchedUserID, tea.WithDBCall(voiceCall))
+		utils.Logger(ctx).Errorf(constant.Service+"UpdateE2EEVoiceCall failed due to invalid status transformation, callID= %d, isHost= %t, curStatus= %v, PatchedStatus= %v", pack.VoiceCall.CallID, pack.IsHost, pack.CurStatus, pack.PatchedStatus)
+		return nil, errors.NewServiceError("InvalidStatusTransformation")
+	}
+	if pack.PatchedStatus == dal.Accepted {
+		isEncrypted := ComputeVoiceCallIsEncrypted(ctx, voiceCall.IsEncrypted, pack.PatchedDeviceID)
+		if isEncrypted {
+			utils.Logger(ctx).Infof(constant.Service+"VoiceCall has been encrypted , CallID= %d", callID)
+		}
+		if !isEncrypted {
+			utils.Logger(ctx).Infof(constant.Service+"VoiceCall hasn't been encrypted , CallID= %d", callID)
+		}
+	}
+	values := calToUpdateFields(pack)
+	if err := dal.UpdateVoiceCall(ctx, voiceCall, values); err != nil {
+		return nil, err
+	}
+
+	utils.Logger(ctx).Infof(constant.Service+"UpdateE2EEVoiceCall success to patch status, callID= %d, isHost= %t, curStatus= %v, patchedStatus= %v", callID, pack.IsHost, pack.CurStatus, pack.PatchedStatus)
+
+	pbVoiceCall, err := proto.PackVoiceCall(pack.PeerUserID, voiceCall)
+	if err != nil {
+		return nil, err
+	}
+
+	if voiceCall.Status.In(dal.Accepted, dal.Refused) {
+		terminatedNotice := constructCancelNotice(pbVoiceCall)
+		utils.Logger(ctx).Infof(constant.Service+"UpdateE2EEVoiceCall NotifyUser other devices to be terminated, callID= %d, userID= %d, excludeDeviceID= %d", callID, pack.CurUserID, pack.PatchedDeviceID)
+		push.NotifyUser(ctx, pack.CurUserID, []int64{pack.PatchedDeviceID}, terminatedNotice, gwpush.WithSavePacket(false))
+	}
+
+	if voiceCall.Status.In(dal.Cancelled, dal.Refused, dal.Unavailable, dal.Terminated) {
+		unlockCurUser := mutex.UnlockUser(ctx, helper.I2S(callID), pack.CurUserID)
+		unlockPeerUser := mutex.UnlockUser(ctx, helper.I2S(callID), pack.PeerUserID)
+		utils.Logger(ctx).Infof(constant.Service+"UpdateE2EEVoiceCall unlock users, curUserID= %d, unlockCurUser= %t, peerUserID= %d, unlockPeerUser= %t", pack.CurUserID, unlockCurUser, pack.PeerUserID, unlockPeerUser)
+	}
+
+	notice := &e2eevoicecall.PushE2EEVoiceCallNotice{
+		Call: pbVoiceCall,
+	}
+	if pack.PeerDeviceID == 0 {
+		utils.Logger(ctx).Infof(constant.Service+"UpdateE2EEVoiceCall NotifyUser, callID= %s, userID= %d, status= %v", notice.GetCall().GetId(), pack.PeerUserID, voiceCall.Status)
+		push.NotifyUser(ctx, pack.PeerUserID, nil, notice, gwpush.WithSavePacket(false))
+	} else {
+		utils.Logger(ctx).Infof(constant.Service+"UpdateE2EEVoiceCall NotifyDevices, callID= %s, userID= %d, deviceID= %d, status= %v", notice.GetCall().GetId(), pack.PeerUserID, pack.PeerDeviceID, voiceCall.Status)
+		push.NotifyDevices(ctx, map[int64]int64{pack.PeerDeviceID: pack.PeerUserID}, notice, gwpush.WithSavePacket(false))
+	}
+
+	switch voiceCall.Status {
+	case dal.Cancelled:
+		message.SendCancelMessage(ctx, pack.CurUserID, voiceCall)
+	case dal.Unavailable:
+		message.SendMissingCallMessage(ctx, pack.CurUserID, voiceCall)
+	case dal.Terminated:
+		message.SendDurationMessage(ctx, pack.CurUserID, voiceCall)
+	case dal.Refused:
+		message.SendRefuseMessage(ctx, pack.CurUserID, voiceCall)
+	case dal.Accepted:
+		go tea.MonitorAcceptWithRemote(ctx, pack.CurUserID, voiceCall)
+	default:
+		break
+	}
+
+	return pbVoiceCall, nil
+}
+
+func parse(ctx context.Context, patchedUserID int64, patchedDeviceID int64, patchedStatus dal.VoIPStatus, patchedPublicKey []byte, patchedUseBytedanceChannel bool, voiceCall *dal.VoiceCall) (*UpdatePack, error) {
+	if patchedUserID == voiceCall.FromUserID {
+		return &UpdatePack{
+			CurUserID:                  voiceCall.FromUserID,
+			CurDeviceID:                voiceCall.FromDeviceID,
+			CurStatus:                  voiceCall.Status,
+			PeerUserID:                 voiceCall.ToUserID,
+			PeerDeviceID:               voiceCall.ToDeviceID,
+			PatchedUserID:              patchedUserID,
+			PatchedDeviceID:            patchedDeviceID,
+			PatchedStatus:              patchedStatus,
+			PatchedPublicKey:           patchedPublicKey,
+			PatchedUseBytedanceChannel: patchedUseBytedanceChannel,
+			IsHost:                     true,
+			VoiceCall:                  voiceCall,
+		}, nil
+	} else if patchedUserID == voiceCall.ToUserID {
+		return &UpdatePack{
+			CurUserID:                  voiceCall.ToUserID,
+			CurDeviceID:                voiceCall.ToDeviceID,
+			CurStatus:                  voiceCall.Status,
+			PeerUserID:                 voiceCall.FromUserID,
+			PeerDeviceID:               voiceCall.FromDeviceID,
+			PatchedUserID:              patchedUserID,
+			PatchedDeviceID:            patchedDeviceID,
+			PatchedStatus:              patchedStatus,
+			PatchedPublicKey:           patchedPublicKey,
+			PatchedUseBytedanceChannel: patchedUseBytedanceChannel,
+			IsHost:                     false,
+			VoiceCall:                  voiceCall,
+		}, nil
+	} else {
+		utils.Logger(ctx).Errorf(constant.Service+"UpdateE2EEVoiceCall failed invalid userID, callID= %d, fromUserID= %d, toUserID= %d, invalidUserID= %d", voiceCall.CallID, voiceCall.FromUserID, voiceCall.ToUserID, patchedUserID)
+		return nil, errors.NewServiceError("InvalidUserID")
+	}
+}
+
+func constructCancelNotice(call *e2eevoicecall.E2EEVoiceCall) *e2eevoicecall.PushE2EEVoiceCallNotice {
+	terminated := e2eevoicecall.E2EEVoiceCall_CANCELLED
+	notice := &e2eevoicecall.E2EEVoiceCall{
+		Id:              call.Id,
+		Status:          &terminated,
+		FromUserId:      call.FromUserId,
+		ToUserId:        call.ToUserId,
+		CreateTime:      call.CreateTime,
+		Extra:           call.Extra,
+		UpdateTime:      call.UpdateTime,
+		ActionStartTime: call.ActionStartTime,
+		PushStartTime:   call.PushStartTime,
+	}
+	return &e2eevoicecall.PushE2EEVoiceCallNotice{
+		Call: notice,
+	}
+}
+
+func needIgnore(curStatus dal.VoIPStatus, patchedStatus dal.VoIPStatus) bool {
+	return curStatus == patchedStatus || isEndStatus(curStatus) && patchedStatus == dal.Terminated
+}
+
+func isEndStatus(status dal.VoIPStatus) bool {
+	return status.In(dal.Occupied, dal.Refused, dal.Unavailable, dal.Cancelled, dal.Terminated, dal.ClientLowVersion)
+}
+
+func isStatusTransValid(isHost bool, curStatus dal.VoIPStatus, patchedStatus dal.VoIPStatus) bool {
+	var dictionary map[dal.VoIPStatus][]dal.VoIPStatus
+	if isHost {
+		dictionary = dal.FromUserStatusTransformation
+	} else {
+		dictionary = dal.ToUserStatusTransformation
+	}
+
+	for _, status := range dictionary[patchedStatus] {
+		if status == curStatus {
+			return true
+		}
+	}
+	return false
+}
+
+func calToUpdateFields(pack *UpdatePack) map[string]interface{} {
+	values := make(map[string]interface{})
+
+	values["status"] = pack.PatchedStatus
+	if pack.CurDeviceID == 0 && pack.PatchedStatus != dal.Ringing {
+		values["to_device_id"] = pack.PatchedDeviceID
+	}
+
+	switch pack.PatchedStatus {
+	case dal.OnTheCall:
+		values["begin_time"] = mysql.NullTime{Time: time.Now(), Valid: true}
+	case dal.Accepted:
+		values["to_public_key"] = pack.PatchedPublicKey
+		values["use_bytedance_channel"] = pack.VoiceCall.UseBytedanceChannel && pack.PatchedUseBytedanceChannel
+	case dal.Terminated:
+		values["end_time"] = mysql.NullTime{Time: time.Now(), Valid: true}
+	}
+
+	return values
+}
