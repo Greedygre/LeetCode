@@ -1,0 +1,38 @@
+
+func FindLongest(str string)string  {
+	result := ""
+	if len(str)== 0 || len(str) == 1 {
+		return str
+	}
+	pre := []byte{str[0]}
+	for i:= 1;i<len(str);i++ {
+       if str[i] == str[i-1]+1 || str[i] == str[i-1] - 31 || str[i] == str[i-1] +33 {
+       	pre = append(pre,str[i])
+
+       	continue
+	   }
+       if len(pre) > len(result) {
+	   	result = *(*string)(unsafe.Pointer(&pre))
+	   	pre = []byte{str[i]}
+	   	continue
+	   }
+		pre = []byte{str[i]}
+	}
+	if len(pre) > len(result) {
+		result = *(*string)(unsafe.Pointer(&pre))
+
+	}
+	return result
+}
+
+
+tips:fmt.Println(FindLongest(str))
+	a := []byte{'a','b'}
+	cur := *(*string)(unsafe.Pointer(&a))
+	a = []byte{}
+	fmt.Println("cur:",cur,"a:",a)
+
+	bytes := []byte("I am byte array !")
+	str1 := (*string)(unsafe.Pointer(&bytes))
+	bytes = []byte{}
+	fmt.Println(*str1)
