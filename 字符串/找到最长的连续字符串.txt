@@ -36,3 +36,5 @@ tips:fmt.Println(FindLongest(str))
 	str1 := (*string)(unsafe.Pointer(&bytes))
 	bytes = []byte{}
 	fmt.Println(*str1)
+这两个，前者不会随着a的改变而改变，后者会。涉及指针的应用，暂时不理解关键。
+byte[]转string
