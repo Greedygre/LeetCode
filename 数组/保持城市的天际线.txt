@@ -1,0 +1,40 @@
+func maxIncreaseKeepingSkyline(grid [][]int) int {
+	sum := 0
+	zuoyou := make([]int,0,len(grid))//行
+	shuiping := make([]int,0,len(grid[0]))//列
+	for i := 0;i<len(grid);i++ {
+		max := 0
+		for j:=0;j<len(grid[0]);j++{
+			if grid[i][j] > max {
+				max = grid[i][j]
+			}
+			}
+		zuoyou = append(zuoyou,max)
+		}
+	for i := 0;i<len(grid[0]);i++ {
+		max := 0
+		for j:=0;j<len(grid);j++{
+			if grid[j][i] > max {
+				max = grid[j][i]
+			}
+		}
+		shuiping = append(shuiping,max)
+	}
+	for i := 0;i<len(grid);i++ {
+		
+		for j:=0;j<len(grid[0]);j++{
+            //fmt.Println(max(shuiping[j],zuoyou[i]))
+			sum += min(shuiping[j],zuoyou[i]) - grid[i][j]
+			//fmt.Println("i:",i,"j:",j,min(shuiping[j],zuoyou[i]) - grid[i][j])
+		}
+
+	}
+	return sum
+}
+func min(a,b int) int {
+	if a>b {
+		return b
+	}else {
+		return a
+	}
+}
