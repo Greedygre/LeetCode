@@ -1,26 +1,5 @@
 package main
 
-import (
-	"container/list"
-	"fmt"
-)
-
-"container/list"
-
-/**
- * Definition for a binary tree node.
- * type TreeNode struct {
- *     Val int
- *     Left *TreeNode
- *     Right *TreeNode
- * }
- */
-// 单值二叉树，如果是返回true，否则返回false
-// 递归的解很简单，能用迭代吗？
-import (
-	"fmt"
-)
-
 func isUnivalTree(root *TreeNode) bool {
 	if root == nil {
 		return true
@@ -40,6 +19,7 @@ func isUnivalTree(root *TreeNode) bool {
 	}
 	return false
 }
+
 //class Solution {
 //    public boolean isUnivalTree(TreeNode root) {
 //    if (root == null) {
@@ -65,7 +45,7 @@ func isUnivalTree(root *TreeNode) bool {
 //    }
 //
 //}
-func isUnivalTree(root *TreeNode) bool {
+func isUnivalTree2(root *TreeNode) bool {
 	if root == nil {
 		return true
 	}
@@ -73,17 +53,17 @@ func isUnivalTree(root *TreeNode) bool {
 	queue := []*TreeNode{root}
 	for len(queue) != 0 {
 		len := len(queue)
-		for i:=0;i<len;i++ {
+		for i := 0; i < len; i++ {
 			node := queue[0]
 			queue = queue[1:]
 			if uval != node.Val {
-                return false
+				return false
 			}
 			if node.Left != nil {
-				queue = append(queue,node.Left)
+				queue = append(queue, node.Left)
 			}
 			if node.Right != nil {
-				queue = append(queue,node.Right)
+				queue = append(queue, node.Right)
 			}
 		}
 	}
