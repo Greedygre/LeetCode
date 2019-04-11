@@ -1,0 +1,31 @@
+//用二分查找搜索一个增序的数组，当有多个元素值与目标元素相等时，返回最后一个元素的下标，目标元素不存在时返回-1
+func BinarySearchMax(data []int, target int) int {
+
+	left := 0
+
+	right := len(data) - 1
+
+	if data[right] == target {
+		return right
+	}
+
+	for left <= right {
+
+		mid := (left + right) / 2
+
+		if data[mid] <= target {
+
+			left = mid + 1
+		} else {
+			right = mid - 1
+		}
+
+	}
+	if data[right] == target {
+
+		return right
+	}
+
+	return -1
+
+}
